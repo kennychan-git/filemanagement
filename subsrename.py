@@ -20,6 +20,9 @@ if os.path.exists(folder_path):
     # Print the number of directories found
     print("Number of directories found:", len(directories))
 
+# Define the target directory for copying the files
+    parent_directory = os.path.dirname(folder_path)
+
     # Loop through each directory and rename the largest file
     for directory in directories:
         # Get the full path to the current directory
@@ -51,11 +54,11 @@ if os.path.exists(folder_path):
         # Copy the renamed file to the folder 1 level above
         try:
         # add newpath2 as root
-            #new_path2 = os.path.splitdrive(folder_path)[0]+"\\"
-            shutil.copy2(new_path, folder_path)
-            print("Copied", new_path, "to", folder_path)
-        except shutil.SameFileError:
-            print("Failed to copy", new_path)
+            target_path = os.path.join(parent_directory, new_name)
+            os.rename(new_path, target_path)
+            print("Moved", new_path, "to", target_path)
+        except OSError as e:
+            print("Failed to move", new_path, "Error:", e)
 
     print("Renaming and copying completed.")
 else:
