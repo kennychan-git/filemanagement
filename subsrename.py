@@ -1,42 +1,62 @@
 import os
 import shutil
 
-# specify the path to the folder you want to scan
-folder_path = r"R:\Succession.S01.1080p.BluRay.x265-RARBG\Subs"
+# Specify the path to the folder you want to scan
+folder_path = r"R:\House.of.the.Dragon.S01.BDRip.x265-ION265\Subs"
 
-#folder_path = r"R:\House.S01.1080p.BluRay.x265-RARBG\Subs"
+# Print the folder path
+print("Folder Path:", folder_path)
 
-# get a list of all directories inside the specified folder
-directories = [d for d in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, d))]
+# Check if the folder exists
+if os.path.exists(folder_path):
+    # Initialize a list to store directories
+    directories = []
 
-# print the number of directories found
-print("Number of directories found:", len(directories))
+    # Traverse through directories using os.walk
+    for root, dirnames, filenames in os.walk(folder_path):
+        # Add each directory to the list
+        directories.extend(dirnames)
 
-# loop through each directory and rename the largest file
-for directory in directories:
-    # get the full path to the current directory
-    directory_path = os.path.join(folder_path, directory)
-    
-    # get a list of all .srt files in the current directory
-    srt_files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f)) and f.endswith("_English.srt")]
-    
-    # find the largest .srt file in the directory
-    largest_srt = max(srt_files, key=lambda f: os.path.getsize(os.path.join(directory_path, f)))
-    
-    # rename the largest .srt file to match the directory name
-    old_path = os.path.join(directory_path, largest_srt)
-    new_name = directory + ".srt"
-    new_path = os.path.join(folder_path, new_name)
-    try:
-        os.rename(old_path, new_path)
-    except shutil.SameFileError:
-        pass
-        
-    # copy the renamed file to the folder 1 level above
-    try:
-        shutil.copy2(new_path, folder_path)
-    except shutil.SameFileError:
-        pass
+    # Print the number of directories found
+    print("Number of directories found:", len(directories))
 
-    # move on to next folder
-    continue
+    # Loop through each directory and rename the largest file
+    for directory in directories:
+        # Get the full path to the current directory
+        directory_path = os.path.join(folder_path, directory)
+
+        # Get a list of all .srt files in the current directory
+        srt_files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f)) and f.endswith("_English.srt")]
+
+        # Print the list of .srt files found
+        print("Files in", directory_path + ":")
+        print(srt_files)
+
+        # Find the largest .srt file in the directory
+        largest_srt = max(srt_files, key=lambda f: os.path.getsize(os.path.join(directory_path, f)))
+
+        # Print the largest .srt file found
+        print("Largest file in", directory_path + ":", largest_srt)
+
+        # Rename the largest .srt file to match the directory name
+        old_path = os.path.join(directory_path, largest_srt)
+        new_name = directory + ".srt"
+        new_path = os.path.join(folder_path, new_name)
+        try:
+            os.rename(old_path, new_path)
+            print("Renamed", old_path, "to", new_path)
+        except shutil.SameFileError:
+            print("Failed to rename", old_path)
+
+        # Copy the renamed file to the folder 1 level above
+        try:
+        # add newpath2 as root
+            #new_path2 = os.path.splitdrive(folder_path)[0]+"\\"
+            shutil.copy2(new_path, folder_path)
+            print("Copied", new_path, "to", folder_path)
+        except shutil.SameFileError:
+            print("Failed to copy", new_path)
+
+    print("Renaming and copying completed.")
+else:
+    print("Folder not found:", folder_path)
