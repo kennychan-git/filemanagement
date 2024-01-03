@@ -3,8 +3,6 @@ print(sys.executable)
 import os
 import time
 from moviepy.editor import VideoFileClip
-import sys
-print(sys.executable)
 
 
 # Function to check frame rate from a video file
