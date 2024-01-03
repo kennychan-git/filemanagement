@@ -1,36 +1,52 @@
 import os
-import cv2
+import time
+from moviepy.editor import VideoFileClip
 
-# Function to get the fps from a video file
-def get_fps(video_path):
+# Function to check frame rate from a video file
+def get_frame_rate(video_path):
     try:
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        return fps
+        clip = VideoFileClip(video_path)
+        frame_rate = clip.fps
+        clip.close()
+        return frame_rate
     except Exception as e:
         return None
 
-# Function to recursively scan for video files with fps of 200
-def find_videos_with_fps(start_dir):
-    target_fps = 200
-    video_files = []
+# Function to recursively scan for movie files with a frame rate of 200 fps
+def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
+    movie_files = []
 
     for root, dirs, files in os.walk(start_dir):
         for file in files:
             if file.lower().endswith(('.mp4', '.mkv')):
                 file_path = os.path.join(root, file)
-                fps = get_fps(file_path)
-                if fps is not None and fps == target_fps:
-                    video_files.append(file_path)
+                frame_rate = get_frame_rate(file_path)
+                if frame_rate is not None and frame_rate == target_frame_rate:
+                    movie_files.append(file_path)
 
-    return video_files
+    return movie_files
 
 # Specify the directory to start the scan
-start_directory = "/path/to/your/directory"
+start_directory = "R:\\test"
 
-# Find video files with fps of 200
-result = find_videos_with_fps(start_directory)
+# Start the timer
+start_time = time.time()
 
-# Print the list of filenames
-for file in result:
-    print(file)
+# Find movie files with a frame rate of 200 fps
+result = find_movie_files_with_frame_rate(start_directory)
+
+# Stop the timer
+end_time = time.time()
+
+# Calculate the elapsed time
+elapsed_time = end_time - start_time
+
+# Check if any files were found and print them, or print "None"
+if result:
+    for file_path in result:
+        print(f"File: {file_path} | Frame Rate: {result[0][1]:.2f} fps")
+else:
+    print("None")
+
+# Print the elapsed time
+print(f"Elapsed Time: {elapsed_time:.2f} seconds")
