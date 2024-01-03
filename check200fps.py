@@ -1,8 +1,7 @@
+import sys
 import os
 import time
 from moviepy.editor import VideoFileClip
-
-
 
 # Function to check frame rate from a video file
 def get_frame_rate(video_path):
@@ -16,6 +15,9 @@ def get_frame_rate(video_path):
 
 # Function to recursively scan for movie files with a frame rate of 200 fps
 def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
+    if not os.path.exists(start_dir):
+        raise FileNotFoundError("The specified directory does not exist.")
+    
     movie_files = []
 
     for root, dirs, files in os.walk(start_dir):
@@ -29,27 +31,31 @@ def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
     return movie_files
 
 # Specify the directory to start the scan
-start_directory = "E:\\Shows\\fearless.2023"
+start_directory = "D:\\Shows"
 
-# Start the timer
-start_time = time.time()
-
-# Find movie files with a frame rate of 200 fps
-result = find_movie_files_with_frame_rate(start_directory)
-
-# Stop the timer
-end_time = time.time()
-
-# Calculate the elapsed time
-elapsed_time = end_time - start_time
-
-# Check if any files were found and print them, or print "None"
-if result:
-    for file_path in result:
-        frame_rate = get_frame_rate(file_path)  # Get the frame rate for each file
-        print("File: {} | Frame Rate: {:.2f} fps".format(file_path, frame_rate))
+# Check if the specified directory exists
+if not os.path.exists(start_directory):
+    print("The specified directory does not exist.")
 else:
-    print("None")
+    # Start the timer
+    start_time = time.time()
 
-# Print the elapsed time
-print(f"Elapsed Time: {elapsed_time:.2f} seconds")
+    # Find movie files with a frame rate of 200 fps
+    result = find_movie_files_with_frame_rate(start_directory)
+
+    # Stop the timer
+    end_time = time.time()
+
+    # Calculate the elapsed time
+    elapsed_time = end_time - start_time
+
+    # Check if any files were found and print them, or print "None"
+    if result:
+        for file_path in result:
+            frame_rate = get_frame_rate(file_path)
+            print("File: {} | Frame Rate: {:.2f} fps".format(file_path, frame_rate))
+    else:
+        print("None")
+
+    # Print the elapsed time
+    print(f"Elapsed Time: {elapsed_time:.2f} seconds")
