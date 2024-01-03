@@ -1,8 +1,7 @@
-import sys
-print(sys.executable)
 import os
 import time
 from moviepy.editor import VideoFileClip
+
 
 
 # Function to check frame rate from a video file
@@ -30,7 +29,7 @@ def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
     return movie_files
 
 # Specify the directory to start the scan
-start_directory = "E:\\Shows"
+start_directory = "E:\\Shows\\fearless.2023"
 
 # Start the timer
 start_time = time.time()
@@ -47,6 +46,7 @@ elapsed_time = end_time - start_time
 # Check if any files were found and print them, or print "None"
 if result:
     for file_path in result:
+        frame_rate = get_frame_rate(file_path)  # Get the frame rate for each file
         print("File: {} | Frame Rate: {:.2f} fps".format(file_path, frame_rate))
 else:
     print("None")
