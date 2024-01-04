@@ -14,7 +14,7 @@ def get_frame_rate(video_path):
         return None
 
 # Function to recursively scan for movie files with a frame rate of 200 fps
-def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
+def find_movie_files_with_frame_rate(start_dir, target_frame_rate=25):
     if not os.path.exists(start_dir):
         raise FileNotFoundError("The specified directory does not exist.")
     
@@ -25,13 +25,13 @@ def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
             if file.lower().endswith(('.mp4', '.mkv')):
                 file_path = os.path.join(root, file)
                 frame_rate = get_frame_rate(file_path)
-                if frame_rate is not None and frame_rate == target_frame_rate:
+                if frame_rate is not None and frame_rate > target_frame_rate:
                     movie_files.append(file_path)
 
     return movie_files
 
 # Specify the directory to start the scan
-start_directory = "E:\\Shows\\the.mutatios.2023"
+start_directory = "E:\\Shows\\lost.you.forever.2023"
 
 # Check if the specified directory exists
 if not os.path.exists(start_directory):
