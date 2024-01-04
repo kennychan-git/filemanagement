@@ -31,11 +31,11 @@ def find_movie_files_with_frame_rate(start_dir, target_frame_rate=200):
     return movie_files
 
 # Specify the directory to start the scan
-start_directory = "D:\\Shows"
+start_directory = "E:\\Shows\\the.mutatios.2023"
 
 # Check if the specified directory exists
 if not os.path.exists(start_directory):
-    print("The specified directory does not exist.")
+    print(f"The specified directory: {start_directory} does not exist.")
 else:
     # Start the timer
     start_time = time.time()
@@ -56,6 +56,8 @@ else:
             print("File: {} | Frame Rate: {:.2f} fps".format(file_path, frame_rate))
     else:
         print("None")
-
+    # Print the directory being checked
+    print(f"Checked Directory: {start_directory}")
+    
     # Print the elapsed time
     print(f"Elapsed Time: {elapsed_time:.2f} seconds")
