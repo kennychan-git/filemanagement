@@ -3,6 +3,9 @@ import os
 import time
 from moviepy.editor import VideoFileClip
 
+# Specify the target frame rate
+target_frame_rate = 25
+
 # Function to check frame rate from a video file
 def get_frame_rate(video_path):
     try:
@@ -13,8 +16,8 @@ def get_frame_rate(video_path):
     except Exception as e:
         return None
 
-# Function to recursively scan for movie files with a frame rate of 200 fps
-def find_movie_files_with_frame_rate(start_dir, target_frame_rate=25):
+# Function to recursively scan for movie files with a frame rate greater than target_frame_rate
+def find_movie_files_with_frame_rate(start_dir):
     if not os.path.exists(start_dir):
         raise FileNotFoundError("The specified directory does not exist.")
     
@@ -31,7 +34,8 @@ def find_movie_files_with_frame_rate(start_dir, target_frame_rate=25):
     return movie_files
 
 # Specify the directory to start the scan
-start_directory = "E:\\Shows\\lost.you.forever.2023"
+# start_directory = "E:\\Shows\\lost.you.forever.2023"
+start_directory = "C:\\Users\\MINE01\\Downloads"
 
 # Check if the specified directory exists
 if not os.path.exists(start_directory):
@@ -40,7 +44,7 @@ else:
     # Start the timer
     start_time = time.time()
 
-    # Find movie files with a frame rate of 200 fps
+    # Find movie files with a frame rate greater than target_frame_rate
     result = find_movie_files_with_frame_rate(start_directory)
 
     # Stop the timer
@@ -55,7 +59,8 @@ else:
             frame_rate = get_frame_rate(file_path)
             print("File: {} | Frame Rate: {:.2f} fps".format(file_path, frame_rate))
     else:
-        print("None")
+        print(f"No files are more than {target_frame_rate} fps")
+    
     # Print the directory being checked
     print(f"Checked Directory: {start_directory}")
     
