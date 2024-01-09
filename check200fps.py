@@ -2,6 +2,7 @@ import sys
 import os
 import time
 from moviepy.editor import VideoFileClip
+from datetime import datetime  # Import the datetime module
 
 # Specify the target frame rate
 target_frame_rate = 25
@@ -41,6 +42,9 @@ start_directory = "C:\\Users\\MINE01\\Downloads"
 if not os.path.exists(start_directory):
     print(f"The specified directory: {start_directory} does not exist.")
 else:
+    # Get the current date and time
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     # Start the timer
     start_time = time.time()
 
@@ -52,6 +56,9 @@ else:
 
     # Calculate the elapsed time
     elapsed_time = end_time - start_time
+
+    # Print the current date and time
+    print(f"Current Time: {current_time}")
 
     # Check if any files were found and print them, or print "None"
     if result:
