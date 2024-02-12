@@ -2,7 +2,8 @@ import os
 import shutil
 
 # Specify the path to the folder you want to scan
-folder_path = r"R:\House.of.the.Dragon.S01.BDRip.x265-ION265\Subs"
+folder_path = r"R:\Monarch.Legacy.of.Monsters.S01.1080p.WEBRip.x265-KONTRAST\Subs"
+#R:\Monarch.Legacy.of.Monsters.S01.1080p.WEBRip.x265-KONTRAST
 
 # Print the folder path
 print("Folder Path:", folder_path)
@@ -27,10 +28,19 @@ if os.path.exists(folder_path):
     for directory in directories:
         # Get the full path to the current directory
         directory_path = os.path.join(folder_path, directory)
-
+        # all_files = os.listdir(directory_path)
+        # print("All files in", directory_path + ":")
+        # print(all_files)
+        
         # Get a list of all .srt files in the current directory
-        srt_files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f)) and f.endswith("_English.srt")]
+        # srt_files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f)) and f.endswith("_English.srt")]
+        # Filter files based on _eng.srt, _eng, or _english
+        srt_files = [f for f in all_files if os.path.isfile(os.path.join(directory_path, f)) and ('_eng.srt' in f.lower() or '_eng' in f.lower() or '_english' in f.lower())]
 
+        # Check if there are no .srt files in the directory
+        if not srt_files:
+            print("No .srt files found in", directory_path)
+            continue  # Move to the next directory
         # Print the list of .srt files found
         print("Files in", directory_path + ":")
         print(srt_files)
