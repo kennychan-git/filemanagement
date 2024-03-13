@@ -2,7 +2,7 @@ import os
 import shutil
 
 # Specify the path to the folder you want to scan
-folder_path = r"R:\Monarch.Legacy.of.Monsters.S01.1080p.WEBRip.x265-KONTRAST\Subs"
+folder_path = r"R:\Person.of.Interest.S01.BDRip.x265-ION265\Subs"
 #R:\Monarch.Legacy.of.Monsters.S01.1080p.WEBRip.x265-KONTRAST
 
 # Print the folder path
@@ -28,7 +28,7 @@ if os.path.exists(folder_path):
     for directory in directories:
         # Get the full path to the current directory
         directory_path = os.path.join(folder_path, directory)
-        # all_files = os.listdir(directory_path)
+        all_files = os.listdir(directory_path)
         # print("All files in", directory_path + ":")
         # print(all_files)
         
