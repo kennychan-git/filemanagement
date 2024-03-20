@@ -35,7 +35,6 @@ def find_movie_files_with_frame_rate(start_dir):
     return movie_files
 
 # Specify the directory to start the scan
-# start_directory = "E:\\Shows\\lost.you.forever.2023"
 start_directory = "C:\\Users\\MINE01\\Downloads"
 
 # Check if the specified directory exists
