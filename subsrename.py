@@ -2,8 +2,8 @@ import os
 import shutil
 
 # Specify the path to the folder you want to scan
-folder_path = r"R:\Person.of.Interest.S01.BDRip.x265-ION265\Subs"
-#R:\Monarch.Legacy.of.Monsters.S01.1080p.WEBRip.x265-KONTRAST
+folder_path = r"D:\shows\Dune.Prophecy.S01.1080p.WEBRip.x265-KONTRAST\Subs"
+# R:\Monarch.Legacy.of.Monsters.S01.1080p.WEBRip.x265-KONTRAST
 
 # Print the folder path
 print("Folder Path:", folder_path)
@@ -21,26 +21,32 @@ if os.path.exists(folder_path):
     # Print the number of directories found
     print("Number of directories found:", len(directories))
 
-# Define the target directory for copying the files
+    # Define the target directory for copying the files
     parent_directory = os.path.dirname(folder_path)
 
     # Loop through each directory and rename the largest file
     for directory in directories:
         # Get the full path to the current directory
         directory_path = os.path.join(folder_path, directory)
-        all_files = os.listdir(directory_path)
-        # print("All files in", directory_path + ":")
-        # print(all_files)
-        
-        # Get a list of all .srt files in the current directory
-        # srt_files = [f for f in os.listdir(directory_path) if os.path.isfile(os.path.join(directory_path, f)) and f.endswith("_English.srt")]
-        # Filter files based on _eng.srt, _eng, or _english
-        srt_files = [f for f in all_files if os.path.isfile(os.path.join(directory_path, f)) and ('_eng.srt' in f.lower() or '_eng' in f.lower() or '_english' in f.lower())]
 
-        # Check if there are no .srt files in the directory
+        # Get a list of all .srt files in the current directory
+        all_files = os.listdir(directory_path)
+        srt_files = [
+            f for f in all_files
+            if os.path.isfile(os.path.join(directory_path, f)) and (
+                '_eng.srt' in f.lower() or 
+                '_eng' in f.lower() or 
+                '_english' in f.lower() or 
+                '.english (sdh).eng.srt' in f.lower() or
+                '.english.eng.srt' in f.lower()
+            )
+        ]
+
+        # Check if the list of .srt files is empty
         if not srt_files:
             print("No .srt files found in", directory_path)
-            continue  # Move to the next directory
+            continue  # Skip to the next directory
+
         # Print the list of .srt files found
         print("Files in", directory_path + ":")
         print(srt_files)
@@ -63,9 +69,8 @@ if os.path.exists(folder_path):
 
         # Copy the renamed file to the folder 1 level above
         try:
-        # add newpath2 as root
             target_path = os.path.join(parent_directory, new_name)
-            os.rename(new_path, target_path)
+            shutil.move(new_path, target_path)
             print("Moved", new_path, "to", target_path)
         except OSError as e:
             print("Failed to move", new_path, "Error:", e)
