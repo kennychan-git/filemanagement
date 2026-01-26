@@ -1,34 +1,36 @@
-# 1. Setup paths and file discovery
-$ffmpegPath = (Get-Command ffmpeg).Source
+# 1. Locate FFmpeg (Auto-finds it in Jellyfin folder)
+$ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Command ffmpeg).Source } 
+              else { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
+
+if (-not (Test-Path $ffmpegPath)) {
+    Write-Host "[!] ERROR: FFmpeg not found. I checked the Jellyfin folder but it's not there." -ForegroundColor Red
+    return
+}
+
 $files = Get-ChildItem -Recurse -Include *.mkv, *.mp4
 $totalFiles = $files.Count
 $counter = [hashtable]::Synchronized(@{ Count = 0 })
 $startTime = [System.Diagnostics.Stopwatch]::StartNew()
 
-# 2. Advanced Multi-GPU Detection Logic
-$gpus = Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Caption
+# 2. Hardware Detection (Bypasses RDP/Remote Display Adapter)
+$gpus = Get-CimInstance Win32_VideoController | Where-Object { 
+    $_.Caption -notmatch "Remote" -and $_.Caption -notmatch "Microsoft" -and $_.Caption -notmatch "Basic"
+} | Select-Object -ExpandProperty Caption
+
 $accel = "none"
 $modeName = "Software (CPU)"
 
-# Logic: Priority goes to Discrete GPUs (NVIDIA/AMD) over Integrated (Intel)
 if ($gpus -match "NVIDIA") {
-    $accel = "cuda"
-    $modeName = "NVIDIA CUDA/NVDEC"
+    $accel = "cuda"; $modeName = "NVIDIA CUDA/NVDEC"
 } elseif ($gpus -match "AMD" -or $gpus -match "Radeon") {
-    # Check if it's an old R7 series (which might fail d3d11va)
-    if ($gpus -match "R7" -or $gpus -match "HD 7000" -or $gpus -match "HD 8000") {
-        $accel = "dxva2"  # Older AMD cards prefer the legacy DXVA2 API
-        $modeName = "AMD Legacy (DXVA2)"
-    } else {
-        $accel = "d3d11va"
-        $modeName = "AMD Modern (D3D11VA)"
-    }
+    $accel = ($gpus -match "R7|HD 7000|HD 8000") ? "dxva2" : "d3d11va"
+    $modeName = "AMD ($accel)"
 } elseif ($gpus -match "Intel") {
-    $accel = "qsv"
-    $modeName = "Intel QuickSync"
+    $accel = "qsv"; $modeName = "Intel QuickSync"
 }
 
-Write-Host ">>> System Hardware Identified: $gpus" -ForegroundColor Cyan
+Write-Host ">>> FFmpeg Path: $ffmpegPath" -ForegroundColor Gray
+Write-Host ">>> Actual Hardware Found: $gpus" -ForegroundColor Cyan
 Write-Host ">>> Best Accelerator Chosen: $modeName" -ForegroundColor Yellow
 Write-Host "--- Starting Scan ---"
 
@@ -44,16 +46,15 @@ $files | ForEach-Object -ThrottleLimit 4 -Parallel {
     if ($hw -eq "none") {
         $check = & $ffexe -v error -i $file.FullName -f null - 2>&1
     } else {
+        # Using -hwaccel to force the GPU to handle the heavy decoding
         $check = & $ffexe -hwaccel $hw -v error -i $file.FullName -f null - 2>&1
     }
     
-    # Progress Calculation
     $sync.Count++
     $c = $sync.Count
     $elapsed = $start.Elapsed.TotalSeconds
     $eta = [TimeSpan]::FromSeconds(($elapsed / $c) * ($using:totalFiles - $c)).ToString("hh\:mm\:ss")
 
-    # Result Logging
     if ($check -match "error" -or $check -match "invalid" -or $check -match "corrupt") { 
         "$($file.FullName) - $($check)" | Out-File -FilePath "corrupt_files.txt" -Append -Encoding utf8
         Write-Host "[!] FAIL: $($file.Name) | ETA: $eta" -ForegroundColor Red
