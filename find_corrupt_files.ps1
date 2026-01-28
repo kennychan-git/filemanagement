@@ -1,81 +1,92 @@
-# 1. Hardware Engine Discovery
+# 1. Targeted dGPU Selection
 $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Command ffmpeg).Source } 
               else { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
 
 $gpuSearch = Get-CimInstance Win32_VideoController | Where-Object { $_.Caption -notmatch "Remote|Microsoft|Basic" }
-$hasQsv = $false; $dGpu = "none"
+$selectedEngine = "none"; $gpuBrand = "None"; $vramBytes = 0
 
 foreach ($gpu in $gpuSearch) {
-    if ($gpu.Caption -match "NVIDIA") { $dGpu = "cuda" }
-    elseif ($gpu.Caption -match "Intel") { $hasQsv = $true }
-    elseif ($gpu.Caption -match "AMD|Radeon") { $dGpu = "d3d11va" }
+    if ($gpu.Caption -match "NVIDIA") { 
+        $selectedEngine = "cuda"; $gpuBrand = "NVIDIA"; $vramBytes = $gpu.AdapterRAM; break 
+    }
+    elseif ($gpu.Caption -match "AMD|Radeon") { 
+        $selectedEngine = "d3d11va"; $gpuBrand = "AMD"; $vramBytes = $gpu.AdapterRAM; break 
+    }
+}
+if ($selectedEngine -eq "none" -and ($gpuSearch.Caption -match "Intel")) {
+    $selectedEngine = "qsv"; $gpuBrand = "Intel (iGPU)"
 }
 
-# 2. Strategy Selector (Baseline Priority)
-$primaryEngine = "none"
-if ($hasQsv) {
-    $primaryEngine = "qsv"
-    $strategy = "Laptop Mode: QSV Primary -> SW Fallback"
-} elseif ($dGpu -ne "none") {
-    $primaryEngine = $dGpu
-    $strategy = "Server Mode (Xeon/Ryzen): $($dGpu.ToUpper()) Primary -> SW Fallback"
-} else {
-    $strategy = "Software-Only Mode"
-}
+# 2. Refined Governor (Safety: 1.5GB/Thread)
+$vramGB = if ($vramBytes) { [math]::Round($vramBytes / 1GB) } else { 0 }
+$maxThreads = if ($selectedEngine -eq "qsv") { 8 } else { [math]::Min(8, [math]::Max(2, [math]::Floor($vramGB / 1.5))) }
 
-# 3. Data Setup
-$allFiles = Get-ChildItem -Recurse -Include *.mkv, *.mp4 | Where-Object { $_.Length -gt 1mb }
-$totalFiles = $allFiles.Count
-$totalSizeInBytes = ($allFiles | Measure-Object -Property Length -Sum).Sum
-
-# 4. UI Header
+# 3. UI Header
 Clear-Host
-Write-Host "================ UNIVERSAL HYBRID SCANNER v7.6 ================" -ForegroundColor Cyan
+Write-Host "================ UNIVERSAL HYBRID SCANNER v9.9 ================" -ForegroundColor Cyan
 Write-Host "MACHINE   : $env:COMPUTERNAME"
-Write-Host "STRATEGY  : $strategy" -ForegroundColor Yellow
-Write-Host "HW ENGINE : $($primaryEngine.ToUpper())"
+Write-Host "TARGET    : $gpuBrand ($vramGB GB VRAM)" -ForegroundColor Yellow
+Write-Host "STRATEGY  : $selectedEngine Engine - $maxThreads Threads" -ForegroundColor Green
 Write-Host "===============================================================" -ForegroundColor Cyan
 
-$sync = [hashtable]::Synchronized(@{ Count = 0; Errors = 0 })
+$allFiles = Get-ChildItem -Recurse -Include *.mkv, *.mp4 | Where-Object { $_.Length -gt 1mb }
+$totalFiles = $allFiles.Count
+$totalSizeMB = [math]::Round(($allFiles | Measure-Object -Property Length -Sum).Sum / 1MB, 2)
 $globalWatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-# 5. Parallel Execution
-$allFiles | ForEach-Object -ThrottleLimit 8 -Parallel {
+# 4. Execution Loop
+$results = $allFiles | ForEach-Object -ThrottleLimit $maxThreads -Parallel {
     $ffexe = $using:ffmpegPath
     $file = $_
-    $s = $using:sync
-    $total = $using:totalFiles
-    $watch = $using:globalWatch
-    $engine = $using:primaryEngine
-
-    $activeEngine = $engine
+    $engine = $using:selectedEngine
+    
+    # Direct execution with error capture
+    $hwErr = & $ffexe -hwaccel $engine -v error -i $file.FullName -f null - 2>&1
+    
+    $status = "Success"
     $isFallback = $false
 
-    # --- ATTEMPT 1: HARDWARE DECODE ---
-    # We use a 1s timeout check (vignette) or just standard error piping
-    $result = & $ffexe -hwaccel $activeEngine -probesize 16777216 -v error -i $file.FullName -f null - 2>&1
-    
-    # --- ATTEMPT 2: SOFTWARE FALLBACK ---
-    # Triggered if Hardware fails (returns anything to $result)
-    if ($result) {
+    if ($hwErr) {
         $isFallback = $true
-        $activeEngine = "software"
-        $result = & $ffexe -v error -i $file.FullName -f null - 2>&1
+        $swErr = & $ffexe -v error -i $file.FullName -f null - 2>&1
+        
+        if ($swErr) {
+            $msg = ($swErr | Out-String).ToLower()
+            if ($msg -match "decoder|not implemented|unsupported|protocol") { $status = "Incompatible" }
+            else { $status = "Error" }
+        } else {
+            $status = "Fallback"
+        }
     }
-    
-    # Result Processing
-    $s.Count++
-    $eta = [TimeSpan]::FromSeconds(($watch.Elapsed.TotalSeconds / $s.Count) * ($total - $s.Count)).ToString("hh\:mm\:ss")
-    
-    # UI Output
-    $displayEngine = if ($isFallback) { "SW-DECODE" } else { $engine.ToUpper().PadRight(9) }
-    $statusColor = if ($result) { "Red" } else { "Green" }
-    $name = if ($file.Name.Length -gt 35) { $file.Name.Substring(0,32) + "..." } else { $file.Name }
-    
-    Write-Host "[$($s.Count)/$total] $displayEngine | $name | ETA: $eta" -ForegroundColor $statusColor
+
+    $label = switch($status) {
+        "Success"      { $engine.ToUpper().PadRight(9) }
+        "Fallback"     { "SW-DECODE" }
+        "Incompatible" { "UNSUPPORT " }
+        "Error"        { "CORRUPT   " }
+    }
+    $color = switch($status) {
+        "Success" { "Green" }
+        "Fallback" { "Yellow" }
+        "Incompatible" { "Magenta" }
+        "Error" { "Red" }
+    }
+    Write-Host "$label | $($file.Name)" -ForegroundColor $color
+    [PSCustomObject]@{ Status = $status; Path = $file.FullName }
 }
 
-# 6. Final Efficiency
+# 5. Final Summary
 $globalWatch.Stop()
-$mbs = [math]::Round(($totalSizeInBytes / 1MB) / $globalWatch.Elapsed.TotalSeconds, 2)
-Write-Host "`nEfficiency: $mbs MB/s | Total Time: $($globalWatch.Elapsed.ToString('hh\:mm\:ss'))" -ForegroundColor Cyan
+$hwCount = ($results | Where-Object { $_.Status -eq "Success" }).Count
+$swCount = ($results | Where-Object { $_.Status -eq "Fallback" }).Count
+$incCount = ($results | Where-Object { $_.Status -eq "Incompatible" }).Count
+$errCount = ($results | Where-Object { $_.Status -eq "Error" }).Count
+
+Write-Host "`n======================= SCAN COMPLETE =========================" -ForegroundColor Cyan
+$efficiency = if ($globalWatch.Elapsed.TotalSeconds -gt 0) { [math]::Round($totalSizeMB / $globalWatch.Elapsed.TotalSeconds, 2) } else { 0 }
+Write-Host "Total Efficiency : $efficiency MB/s"
+Write-Host "Hardware Success : $hwCount" -ForegroundColor Green
+Write-Host "Software Fallback: $swCount" -ForegroundColor Yellow
+Write-Host "HW Incompatible  : $incCount" -ForegroundColor Magenta
+Write-Host "TRULY CORRUPT    : $errCount" -ForegroundColor Red
+Write-Host "===============================================================" -ForegroundColor Cyan
