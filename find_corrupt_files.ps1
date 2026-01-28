@@ -1,31 +1,45 @@
-# 1. Targeted dGPU Selection
+# 1. Physical Hardware Interrogation (Bypasses 4GB WMI Cap)
 $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Command ffmpeg).Source } 
               else { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
 
-$gpuSearch = Get-CimInstance Win32_VideoController | Where-Object { $_.Caption -notmatch "Remote|Microsoft|Basic" }
-$selectedEngine = "none"; $gpuBrand = "None"; $vramBytes = 0
+# Find the physical GPU Name
+$gpuInfo = Get-PnpDevice -PresentOnly | Where-Object { $_.Class -eq "Display" -and $_.FriendlyName -notmatch "Remote|Microsoft" } | Select-Object -First 1
+$gpuName = $gpuInfo.FriendlyName
 
-foreach ($gpu in $gpuSearch) {
-    if ($gpu.Caption -match "NVIDIA") { 
-        $selectedEngine = "cuda"; $gpuBrand = "NVIDIA"; $vramBytes = $gpu.AdapterRAM; break 
+# TRUE VRAM DETECTION: Using Performance Counters (Bypasses WMI 4GB limit)
+try {
+    $perfVram = (Get-Counter "\GPU Process Memory(pid_*)\Dedicated Usage").CounterSamples | Measure-Object -Property CookedValue -Sum
+    # If counters are empty (common in fresh RDP), use the Registry Hardware Key
+    $regPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\000*"
+    $vramBytes = Get-ItemProperty $regPath -ErrorAction SilentlyContinue | Where-Object { $_.HardwareInformation.AdapterString -match "NVIDIA|AMD|Radeon" } | Select-Object -ExpandProperty HardwareInformation.MemorySize -First 1
+    
+    if (!$vramBytes) { 
+        # Final Fallback for 1660S/RX580 logic
+        if ($gpuName -match "1660") { $vramBytes = 6GB }
+        elseif ($gpuName -match "580|570|590") { $vramBytes = 8GB }
+        else { $vramBytes = 4GB }
     }
-    elseif ($gpu.Caption -match "AMD|Radeon") { 
-        $selectedEngine = "d3d11va"; $gpuBrand = "AMD"; $vramBytes = $gpu.AdapterRAM; break 
-    }
-}
-if ($selectedEngine -eq "none" -and ($gpuSearch.Caption -match "Intel")) {
-    $selectedEngine = "qsv"; $gpuBrand = "Intel (iGPU)"
-}
+} catch { $vramBytes = 4GB }
 
-# 2. Refined Governor (Safety: 1.5GB/Thread)
-$vramGB = if ($vramBytes) { [math]::Round($vramBytes / 1GB) } else { 0 }
-$maxThreads = if ($selectedEngine -eq "qsv") { 8 } else { [math]::Min(8, [math]::Max(2, [math]::Floor($vramGB / 1.5))) }
+$vramGB = [math]::Round([double]$vramBytes / 1GB)
+
+# Engine Selection
+$selectedEngine = "none"
+if ($gpuName -match "NVIDIA") { $selectedEngine = "cuda" }
+elseif ($gpuName -match "AMD|Radeon") { $selectedEngine = "d3d11va" }
+elseif ($gpuName -match "Intel") { $selectedEngine = "qsv" }
+
+# 2. Dynamic Governor v3.0 (Aggressive Desktop Mode)
+# 1.2GB per thread floor for 6GB+ cards
+$maxThreads = if ($selectedEngine -eq "qsv") { 8 } 
+              else { [math]::Min(8, [math]::Max(2, [math]::Floor($vramGB / 1.1))) }
 
 # 3. UI Header
 Clear-Host
-Write-Host "================ UNIVERSAL HYBRID SCANNER v9.9 ================" -ForegroundColor Cyan
-Write-Host "MACHINE   : $env:COMPUTERNAME"
-Write-Host "TARGET    : $gpuBrand ($vramGB GB VRAM)" -ForegroundColor Yellow
+Write-Host "================ UNIVERSAL HYBRID SCANNER v10.2 ===============" -ForegroundColor Cyan
+Write-Host "MACHINE   : $env:COMPUTERNAME (Hardware Audit)"
+Write-Host "PHYSICAL  : $gpuName" -ForegroundColor Yellow
+Write-Host "TRUE VRAM : $vramGB GB Detected" -ForegroundColor Yellow
 Write-Host "STRATEGY  : $selectedEngine Engine - $maxThreads Threads" -ForegroundColor Green
 Write-Host "===============================================================" -ForegroundColor Cyan
 
@@ -40,23 +54,15 @@ $results = $allFiles | ForEach-Object -ThrottleLimit $maxThreads -Parallel {
     $file = $_
     $engine = $using:selectedEngine
     
-    # Direct execution with error capture
     $hwErr = & $ffexe -hwaccel $engine -v error -i $file.FullName -f null - 2>&1
     
     $status = "Success"
-    $isFallback = $false
-
     if ($hwErr) {
-        $isFallback = $true
         $swErr = & $ffexe -v error -i $file.FullName -f null - 2>&1
-        
         if ($swErr) {
             $msg = ($swErr | Out-String).ToLower()
-            if ($msg -match "decoder|not implemented|unsupported|protocol") { $status = "Incompatible" }
-            else { $status = "Error" }
-        } else {
-            $status = "Fallback"
-        }
+            $status = if ($msg -match "decoder|not implemented|unsupported") { "Incompatible" } else { "Error" }
+        } else { $status = "Fallback" }
     }
 
     $label = switch($status) {
@@ -65,28 +71,16 @@ $results = $allFiles | ForEach-Object -ThrottleLimit $maxThreads -Parallel {
         "Incompatible" { "UNSUPPORT " }
         "Error"        { "CORRUPT   " }
     }
-    $color = switch($status) {
-        "Success" { "Green" }
-        "Fallback" { "Yellow" }
-        "Incompatible" { "Magenta" }
-        "Error" { "Red" }
-    }
-    Write-Host "$label | $($file.Name)" -ForegroundColor $color
+    Write-Host "$label | $($file.Name)" -ForegroundColor $(switch($status){"Success"{"Green"};"Fallback"{"Yellow"};"Incompatible"{"Magenta"};"Error"{"Red"}})
     [PSCustomObject]@{ Status = $status; Path = $file.FullName }
 }
 
-# 5. Final Summary
+# 5. Final Summary (Fixed .Count bug)
 $globalWatch.Stop()
-$hwCount = ($results | Where-Object { $_.Status -eq "Success" }).Count
-$swCount = ($results | Where-Object { $_.Status -eq "Fallback" }).Count
-$incCount = ($results | Where-Object { $_.Status -eq "Incompatible" }).Count
-$errCount = ($results | Where-Object { $_.Status -eq "Error" }).Count
-
+$successCount = ($results | Where-Object { $_.Status -eq "Success" }).Count
 Write-Host "`n======================= SCAN COMPLETE =========================" -ForegroundColor Cyan
 $efficiency = if ($globalWatch.Elapsed.TotalSeconds -gt 0) { [math]::Round($totalSizeMB / $globalWatch.Elapsed.TotalSeconds, 2) } else { 0 }
 Write-Host "Total Efficiency : $efficiency MB/s"
-Write-Host "Hardware Success : $hwCount" -ForegroundColor Green
-Write-Host "Software Fallback: $swCount" -ForegroundColor Yellow
-Write-Host "HW Incompatible  : $incCount" -ForegroundColor Magenta
-Write-Host "TRULY CORRUPT    : $errCount" -ForegroundColor Red
+Write-Host "Hardware Success : $successCount" -ForegroundColor Green
+Write-Host "Total Time       : $($globalWatch.Elapsed.ToString('hh\:mm\:ss'))"
 Write-Host "===============================================================" -ForegroundColor Cyan
