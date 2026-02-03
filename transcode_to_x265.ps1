@@ -1,25 +1,41 @@
-# --- 1. Setup ---
+# --- 1. Robust Path Discovery ---
 $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Command ffmpeg).Source } 
-              else { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
+              else { "C:\Users\me\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe" }
 $ffprobePath = $ffmpegPath.Replace("ffmpeg.exe", "ffprobe.exe")
 
+# --- 2. Reliable AVX-512 Hardware Check ---
+# We try to initialize a dummy x265 session with AVX-512 forced. 
+# If it doesn't error out, the hardware/software combo is good to go.
+$isAVX512 = $false
+try {
+    $test = & $ffmpegPath -f lavfi -i color=c=black:s=16x16:d=0.1 -c:v libx265 -x265-params "asm=avx512" -f null - 2>&1
+    if ($test -notmatch "invalid|error|not found") { $isAVX512 = $true }
+} catch { $isAVX512 = $false }
+
+if ($isAVX512) {
+    $modeMsg = "AVX-512 (Ultra High Throughput)"
+    $modeColor = "Yellow"
+    $x265Asm = "asm=avx512"
+} else {
+    $modeMsg = "AVX2/Standard (Legacy Support)"
+    $modeColor = "Cyan"
+    $x265Asm = "auto" 
+}
+
+# --- 3. Stats Tracking ---
+$startTime = Get-Date
 $totalOriginalSize = 0
 $totalNewSize = 0
 $filesProcessed = 0
 
-# --- 2. Configuration ---
-$crfValue   = 28
-$preset     = "medium"
+Write-Host "FFmpeg Expert Mode: $modeMsg" -ForegroundColor $modeColor
+Write-Host "Using FFmpeg at: $ffmpegPath" -ForegroundColor Gray
 
-Write-Host "FFmpeg Expert Mode: Activated (AVX-512)" -ForegroundColor Yellow
-
-# --- 3. Processing (Added .mov to filter) ---
+# --- 4. Processing ---
 $files = Get-ChildItem -File | Where-Object { $_.Extension -match "mp4|mkv|avi|mov" -and $_.Name -notlike "*_x265*" }
 
 foreach ($file in $files) {
-    Write-Host "`n------------------------------------------------" -ForegroundColor White
-    
-    # Deep Codec Inspection
+    # Codec Inspection
     $codec = & $ffprobePath -v error -select_streams v:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 $file.FullName
     
     if ($codec -eq "hevc") {
@@ -31,15 +47,15 @@ foreach ($file in $files) {
     $outputPath = Join-Path $file.DirectoryName $newName
     if (Test-Path $outputPath) { continue }
 
-    Write-Host "Transcoding: $($file.Name) [Codec: $codec]" -ForegroundColor Cyan
+    Write-Host "`n------------------------------------------------" -ForegroundColor White
+    Write-Host "Transcoding: $($file.Name)" -ForegroundColor Cyan
     
-    # AVX-512 Optimized Command
     & $ffmpegPath -i $file.FullName `
              -map 0 `
              -c:v:0 libx265 `
-             -crf $crfValue `
-             -preset $preset `
-             -x265-params "asm=avx512:log-level=info" `
+             -crf 28 `
+             -preset medium `
+             -x265-params "$($x265Asm):log-level=info" `
              -pix_fmt yuv420p10le `
              -c:a copy `
              -c:s copy `
@@ -47,23 +63,26 @@ foreach ($file in $files) {
              -stats $outputPath
 
     if (Test-Path $outputPath) {
-        $oldSize = $file.Length
-        $newSize = (Get-Item $outputPath).Length
-        $totalOriginalSize += $oldSize
-        $totalNewSize += $newSize
+        $totalOriginalSize += $file.Length
+        $totalNewSize += (Get-Item $outputPath).Length
         $filesProcessed++
-        Write-Host "DONE: $([math]::Round($newSize/1MB,2)) MB (was $([math]::Round($oldSize/1MB,2)) MB)" -ForegroundColor Green
+        Write-Host "SUCCESS: Saved to $([math]::Round((Get-Item $outputPath).Length/1MB,2)) MB" -ForegroundColor Green
     }
 }
 
-# --- 4. Final Summary ---
+# --- 5. Final Summary ---
+$endTime = Get-Date
+$duration = $endTime - $startTime
+
 if ($filesProcessed -gt 0) {
     $savedBytes = $totalOriginalSize - $totalNewSize
     $percent = [math]::Round(($savedBytes / $totalOriginalSize) * 100, 2)
+    
     Write-Host "`n================================================" -ForegroundColor Magenta
-    Write-Host "                FINAL SUMMARY" -ForegroundColor Magenta
+    Write-Host "                FINAL BATCH REPORT" -ForegroundColor Magenta
     Write-Host "================================================" -ForegroundColor Magenta
-    Write-Host "Files Processed: $filesProcessed"
+    Write-Host "Total Files:     $filesProcessed"
+    Write-Host "Total Time:      $($duration.ToString("hh\:mm\:ss"))"
     Write-Host "Total In:        $([math]::Round($totalOriginalSize/1GB, 3)) GB"
     Write-Host "Total Out:       $([math]::Round($totalNewSize/1GB, 3)) GB"
     Write-Host "Space Saved:     $([math]::Round($savedBytes/1GB, 3)) GB ($percent%)" -ForegroundColor Green
