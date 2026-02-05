@@ -19,7 +19,8 @@ if ($engines.Count -gt 1) {
 } elseif ($engines.Count -eq 1) { $selectedEngine = $engines[0].Engine }
 
 # --- 2. Processing ---
-$files = Get-ChildItem -Path "." -Filter "*.mp4"
+#$files = Get-ChildItem -Path "." -Filter "*.mp4"
+$files = Get-ChildItem -File | Where-Object { $_.Extension -match "mp4|mov|avi" }
 $startTime = Get-Date
 $totalFrames = 0
 $totalAuditTime = 0
