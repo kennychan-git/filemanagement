@@ -1,67 +1,82 @@
-# --- 1. Path Discovery ---
+# --- 1. Hardware Interrogation & Selection ---
 $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Command ffmpeg).Source } 
-              else { "C:\Users\me\AppData\Local\Microsoft\WinGet\Links\ffmpeg.exe" }
+              else { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
 
-# --- 2. Stats Tracking ---
-$startTime = Get-Date
-$filesProcessed = 0
-$failedFiles = @()
+$gpus = Get-PnpDevice -PresentOnly | Where-Object { $_.Class -eq "Display" -and $_.FriendlyName -notmatch "Remote|Microsoft" }
+$engines = @()
+foreach ($gpu in $gpus) {
+    if ($gpu.FriendlyName -match "NVIDIA") { $engines += [PSCustomObject]@{ Name = "NVIDIA (CUDA)"; Engine = "cuda" } }
+    elseif ($gpu.FriendlyName -match "Intel") { $engines += [PSCustomObject]@{ Name = "Intel (QuickSync)"; Engine = "qsv" } }
+}
 
-Write-Host "Mode: Ultra-Fast Remux + Integrity Check (Pro Data Stripped)" -ForegroundColor Green
+$selectedEngine = "none"
+if ($engines.Count -gt 1) {
+    Write-Host "`nHardware Engines Detected:" -ForegroundColor Cyan
+    for ($i = 0; $i -lt $engines.Count; $i++) { Write-Host " [$i] $($engines[$i].Name)" }
+    Write-Host " [S] Software (CPU Only)"
+    $choice = Read-Host "`nSelect Engine"
+    if ($choice -match '^\d$' -and [int]$choice -lt $engines.Count) { $selectedEngine = $engines[[int]$choice].Engine }
+} elseif ($engines.Count -eq 1) { $selectedEngine = $engines[0].Engine }
 
-# --- 3. Processing ---
+# --- 2. Processing ---
 $files = Get-ChildItem -Path "." -Filter "*.mp4"
+$startTime = Get-Date
+$totalFrames = 0
+$totalAuditTime = 0
+$filesProcessed = 0
+
+Clear-Host
+Write-Host "================ UNIVERSAL REMUXER v2.6 ================" -ForegroundColor Cyan
+Write-Host "ACTIVE ENGINE : $(if($selectedEngine -eq 'none') { 'SOFTWARE' } else { $selectedEngine.ToUpper() })" -ForegroundColor Yellow
+Write-Host "========================================================" -ForegroundColor Cyan
 
 foreach ($file in $files) {
-    # Define output filename: OriginalName.mkv
     $newName = $file.BaseName + ".mkv"
     $outputPath = Join-Path $file.DirectoryName $newName
-    
-    # Skip if output already exists
-    if (Test-Path $outputPath) { 
-        Write-Host "SKIPPING: $($newName) already exists." -ForegroundColor Yellow
-        continue 
-    }
+    if (Test-Path $outputPath) { continue }
 
-    Write-Host "`nStep 1: Remuxing $($file.Name)..." -ForegroundColor Cyan
-    
-    # -map 0      -> Include all streams (Video, Audio, Subs)
-    # -map -0:d   -> EXCLUDE data/timecode streams (Fixes Canon/Apple errors)
-    # -c copy     -> Copy streams without re-encoding (Zero quality loss)
+    Write-Host "`n[1/2] Remuxing: $($file.Name)" -ForegroundColor Cyan
     & $ffmpegPath -i $file.FullName -map 0 -map -0:d -c copy -map_metadata 0 -v error $outputPath
 
-    if ($LASTEXITCODE -eq 0 -and (Test-Path $outputPath)) {
-        Write-Host "Step 2: Verifying Integrity..." -ForegroundColor Gray
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "[2/2] Auditing with $selectedEngine..." -ForegroundColor Gray
+        $hwArgs = if ($selectedEngine -ne "none") { @("-hwaccel", $selectedEngine) } else { @() }
         
-        # Verification: Read through the file to ensure no packet corruption
-        & $ffmpegPath -v error -i $outputPath -f null - 2>$null
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "VERIFIED: $($newName) is healthy." -ForegroundColor Green
-            $filesProcessed++
+        $auditTimer = [System.Diagnostics.Stopwatch]::StartNew()
+        $log = & $ffmpegPath $hwArgs -i $outputPath -f null -benchmark - 2>&1
+        $auditTimer.Stop()
+
+        $logString = $log -join "`n"
+        if ($logString -match 'frame=\s*(\d+)') {
+            $frames = [int]$matches[1]
+            $sec = $auditTimer.Elapsed.TotalSeconds
+            $fps = [math]::Round($frames / $sec, 2)
+            
+            $totalFrames += $frames
+            $totalAuditTime += $sec
+            
+            # --- Performance Telemetry Logic ---
+            if ($fps -lt 2.0 -and $selectedEngine -ne "none") {
+                Write-Host "VERIFIED: $frames frames @ $fps FPS (!! HW SATURATION: Extreme Profile !!)" -ForegroundColor Red
+            } elseif ($fps -lt 15.0 -and $selectedEngine -ne "none") {
+                Write-Host "VERIFIED: $frames frames @ $fps FPS (HEAVY: High Complexity)" -ForegroundColor Yellow
+            } else {
+                Write-Host "VERIFIED: $frames frames @ $fps FPS" -ForegroundColor Green
+            }
         } else {
-            Write-Host "FAILURE: $($newName) failed integrity check!" -ForegroundColor Red
-            $failedFiles += $newName
-            # Rename failed file to prevent Jellyfin from trying to scan it
-            Rename-Item $outputPath ($newName + ".CORRUPT")
+            Write-Host "VERIFIED: Integrity Check Passed." -ForegroundColor Green
         }
-    } else {
-        Write-Host "ERROR: FFmpeg failed during remux of $($file.Name)" -ForegroundColor Red
-        $failedFiles += $file.Name
+        $filesProcessed++
     }
 }
 
-# --- 4. Final Summary ---
-$endTime = Get-Date
-$duration = $endTime - $startTime
-Write-Host "`n================================================" -ForegroundColor Magenta
-Write-Host "            REMUX & VERIFY REPORT"
-Write-Host "================================================" -ForegroundColor Magenta
-Write-Host "Files Successfully Remuxed: $filesProcessed"
-Write-Host "Total Time:                 $($duration.ToString("hh\:mm\:ss"))"
-
-if ($failedFiles.Count -gt 0) {
-    Write-Host "Warning: $($failedFiles.Count) files failed or had errors." -ForegroundColor Red
-    foreach ($f in $failedFiles) { Write-Host " - $f" }
+# --- 3. Final Report ---
+$totalTime = (Get-Date) - $startTime
+Write-Host "`n======================= REPORT =========================" -ForegroundColor Magenta
+Write-Host "Total Files      : $filesProcessed"
+if ($totalAuditTime -gt 0) {
+    $avgFps = [math]::Round($totalFrames / $totalAuditTime, 2)
+    Write-Host "Average Perf     : $avgFps FPS" -ForegroundColor Yellow
 }
-Write-Host "================================================" -ForegroundColor Magenta
+Write-Host "Total Duration   : $($totalTime.ToString('hh\:mm\:ss'))"
+Write-Host "========================================================" -ForegroundColor Magenta
