@@ -27,37 +27,37 @@ $totalAuditTime = 0
 $filesProcessed = 0
 
 Clear-Host
-Write-Host "================ UNIVERSAL REMUXER v2.8.2 ================" -ForegroundColor Cyan
+Write-Host "================ UNIVERSAL REMUXER v2.9 ================" -ForegroundColor Cyan
 Write-Host "ACTIVE ENGINE : $(if($selectedEngine -eq 'none') { 'SOFTWARE' } else { $selectedEngine.ToUpper() })" -ForegroundColor Yellow
-Write-Host "FEATURES      : External Sub Merging + Hardware Audit" -ForegroundColor Gray
-Write-Host "==========================================================" -ForegroundColor Cyan
+Write-Host "STABILITY     : Silent-Safe Mapping Enabled" -ForegroundColor Gray
+Write-Host "========================================================" -ForegroundColor Cyan
 
 foreach ($file in $files) {
     $newName = $file.BaseName + ".mkv"
     $outputPath = Join-Path $file.DirectoryName $newName
     if (Test-Path $outputPath) { continue }
 
-    # SEARCH FOR EXTERNAL SUBS (Matching Filename)
     $externalSub = Get-ChildItem -Path $file.DirectoryName -Filter ($file.BaseName + "*.srt") | Select-Object -First 1
 
     Write-Host "`n[1/2] Remuxing: $($file.Name)" -ForegroundColor Cyan
+    Write-Host "       Target : $newName" -ForegroundColor Gray
     
+    # FIXED MAPPING: Added '?' to audio/subtitle maps to prevent crashes on silent or sub-less files.
     if ($externalSub) {
-        Write-Host "SUBTITLES : FOUND EXTERNAL -> $($externalSub.Name)" -ForegroundColor Magenta
+        Write-Host "       SUBS   : Found External -> $($externalSub.Name)" -ForegroundColor Magenta
         & $ffmpegPath -i $file.FullName -i $externalSub.FullName `
-            -map 0:v -map 0:a -map 1:s? -map 0:s? `
+            -map 0:v -map 0:a? -map 1:s? -map 0:s? `
             -c:v copy -c:a copy -c:s srt `
             -metadata:s:s:0 title="External Injected" -disposition:s:0 default `
             -map_metadata 0 -v error $outputPath
     } else {
         & $ffmpegPath -i $file.FullName `
-            -map 0:v -map 0:a -map 0:s? `
+            -map 0:v -map 0:a? -map 0:s? `
             -c:v copy -c:a copy -c:s srt `
             -map_metadata 0 -v error $outputPath
     }
 
     if ($LASTEXITCODE -eq 0) {
-        # --- REINTEGRATED AUDIT LOGIC ---
         Write-Host "[2/2] Auditing with $selectedEngine..." -ForegroundColor Gray
         $hwArgs = if ($selectedEngine -ne "none") { @("-hwaccel", $selectedEngine) } else { @() }
         
@@ -73,17 +73,18 @@ foreach ($file in $files) {
             $totalFrames += $frames
             $totalAuditTime += $sec
             
-            # Subtitle verification for the report
             $subCheck = & $ffprobePath -v error -select_streams s -show_entries stream=codec_name -of csv=p=0 $outputPath
-            $subStatus = if($subCheck) { "OK ($($subCheck -join ','))" } else { "NONE" }
+            $subStatus = if($subCheck) { "SUBS: OK ($($subCheck -join ','))" } else { "SUBS: NONE" }
 
-            if ($fps -lt 15.0 -and $selectedEngine -ne "none") {
-                Write-Host "VERIFIED  : $frames frames @ $fps FPS (HEAVY) | SUBS: $subStatus" -ForegroundColor Yellow
+            # TUNED PERFORMANCE TELEMETRY: Focus on Decoder Throughput
+            if ($fps -lt 2.0 -and $selectedEngine -ne "none") {
+                Write-Host "VERIFIED: $frames frames @ $fps FPS (DECODER BOTTLE NECK: Critical Low)" -ForegroundColor Red
+            } elseif ($fps -lt 15.0 -and $selectedEngine -ne "none") {
+                Write-Host "VERIFIED: $frames frames @ $fps FPS (LOW THROUGHPUT: Non-Native HW Profile)" -ForegroundColor Yellow
             } else {
-                Write-Host "VERIFIED  : $frames frames @ $fps FPS | SUBS: $subStatus" -ForegroundColor Green
+                Write-Host "VERIFIED: $frames frames @ $fps FPS (OPTIMAL)" -ForegroundColor Green
             }
-        } else {
-            Write-Host "VERIFIED  : Integrity Check Passed." -ForegroundColor Green
+            Write-Host "       $subStatus" -ForegroundColor Gray
         }
         $filesProcessed++
     }
