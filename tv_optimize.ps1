@@ -8,7 +8,7 @@ $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Comma
 #$ffprobePath = $ffmpegPath.Replace("ffmpeg.exe", "ffprobe.exe")
 $ffprobePath = Join-Path (Split-Path $ffmpegPath) "ffprobe.exe"
 
-Write-Host "================ LIBRARY STANDARDIZER v1.7 ================" -ForegroundColor Cyan
+Write-Host "================ LIBRARY STANDARDIZER v1.8 ================" -ForegroundColor Cyan
 Write-Host "MODE    : X265 Priority + Robust Audio Detection"
 Write-Host "===========================================================" -ForegroundColor Cyan
 
