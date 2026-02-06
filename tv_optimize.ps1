@@ -5,7 +5,8 @@ $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Comma
               elseif (Test-Path "C:\Program Files\Jellyfin\Server\ffmpeg.exe") { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
               else { Write-Error "FFmpeg not found!"; break }
 
-$ffprobePath = $ffmpegPath.Replace("ffmpeg.exe", "ffprobe.exe")
+#$ffprobePath = $ffmpegPath.Replace("ffmpeg.exe", "ffprobe.exe")
+$ffprobePath = Join-Path (Split-Path $ffmpegPath) "ffprobe.exe"
 
 Write-Host "================ LIBRARY STANDARDIZER v1.7 ================" -ForegroundColor Cyan
 Write-Host "MODE    : X265 Priority + Robust Audio Detection"
