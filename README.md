@@ -1,5 +1,10 @@
 # Universal Media Pipeline v4.7 (AVX-512 Optimized)
 
+1. remux and bake subs - .mkv
+2. transcode to x265 with AVX512 laptop - _x265.mkv
+3. tv optimize audio tracks - _standardized.mkv
+4. audit results - find_corrupt_files.ps1
+
 A high-performance, modular PowerShell media pipeline designed for **11th Gen+ Intel Core (Tiger Lake/Rocket Lake)** architectures. This suite optimizes video libraries for modern SoCs (Amlogic S922-H, Nvidia Shield) and Jellyfin servers.
 
 ---
