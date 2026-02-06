@@ -1,102 +1,80 @@
-# --- 1. Hardware Interrogation & Selection ---
+# --- 1. Path & Hardware Setup ---
 $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Command ffmpeg).Source } 
               else { "C:\Program Files\Jellyfin\Server\ffmpeg.exe" }
 $ffprobePath = $ffmpegPath.Replace("ffmpeg.exe", "ffprobe.exe")
 
-$gpus = Get-PnpDevice -PresentOnly | Where-Object { $_.Class -eq "Display" -and $_.FriendlyName -notmatch "Remote|Microsoft" }
-$engines = @()
-foreach ($gpu in $gpus) {
-    if ($gpu.FriendlyName -match "NVIDIA") { $engines += [PSCustomObject]@{ Name = "NVIDIA (CUDA)"; Engine = "cuda" } }
-    elseif ($gpu.FriendlyName -match "Intel") { $engines += [PSCustomObject]@{ Name = "Intel (QuickSync)"; Engine = "qsv" } }
+# --- 2. File Discovery ---
+# This targets the core "containers" you want to move into Matroska
+$files = Get-ChildItem -Path "." -File | Where-Object { 
+    $_.Extension -match "\.(mp4|mov|avi)$" -and 
+    $_.Name -notlike "*_standardized*" 
 }
 
-$selectedEngine = "none"
-if ($engines.Count -gt 1) {
-    Write-Host "`nHardware Engines Detected:" -ForegroundColor Cyan
-    for ($i = 0; $i -lt $engines.Count; $i++) { Write-Host " [$i] $($engines[$i].Name)" }
-    Write-Host " [S] Software (CPU Only)"
-    $choice = Read-Host "`nSelect Engine"
-    if ($choice -match '^\d$' -and [int]$choice -lt $engines.Count) { $selectedEngine = $engines[[int]$choice].Engine }
-} elseif ($engines.Count -eq 1) { $selectedEngine = $engines[0].Engine }
+if ($files.Count -eq 0) {
+    Write-Host "NOTE: No MP4/MOV/AVI files found. If your files are already MKV, use the Standardizer instead." -ForegroundColor Yellow
+    return
+}
 
-# --- 2. Processing ---
-$files = Get-ChildItem -File | Where-Object { $_.Extension -match "mp4|mov|avi" }
 $startTime = Get-Date
-$totalFrames = 0
-$totalAuditTime = 0
 $filesProcessed = 0
 
 Clear-Host
-Write-Host "================ UNIVERSAL REMUXER v2.9 ================" -ForegroundColor Cyan
-Write-Host "ACTIVE ENGINE : $(if($selectedEngine -eq 'none') { 'SOFTWARE' } else { $selectedEngine.ToUpper() })" -ForegroundColor Yellow
-Write-Host "STABILITY     : Silent-Safe Mapping Enabled" -ForegroundColor Gray
+Write-Host "================ UNIVERSAL REMUXER v3.3 ================" -ForegroundColor Cyan
+Write-Host "STABILITY     : EIA-608 Captions & Telemetry Shield" -ForegroundColor Gray
+Write-Host "CLEANUP       : MANUAL (Originals will be preserved)" -ForegroundColor Yellow
 Write-Host "========================================================" -ForegroundColor Cyan
 
 foreach ($file in $files) {
     $newName = $file.BaseName + ".mkv"
     $outputPath = Join-Path $file.DirectoryName $newName
-    if (Test-Path $outputPath) { continue }
-
-    $externalSub = Get-ChildItem -Path $file.DirectoryName -Filter ($file.BaseName + "*.srt") | Select-Object -First 1
+    
+    # Skip if output already exists to avoid redundant work
+    if (Test-Path $outputPath) { 
+        Write-Host "SKIPPING: $($newName) already exists." -ForegroundColor Gray
+        continue 
+    }
 
     Write-Host "`n[1/2] Remuxing: $($file.Name)" -ForegroundColor Cyan
-    Write-Host "       Target : $newName" -ForegroundColor Gray
     
-    # FIXED MAPPING: Added '?' to audio/subtitle maps to prevent crashes on silent or sub-less files.
-    if ($externalSub) {
-        Write-Host "       SUBS   : Found External -> $($externalSub.Name)" -ForegroundColor Magenta
-        & $ffmpegPath -i $file.FullName -i $externalSub.FullName `
-            -map 0:v -map 0:a? -map 1:s? -map 0:s? `
-            -c:v copy -c:a copy -c:s srt `
-            -metadata:s:s:0 title="External Injected" -disposition:s:0 default `
-            -map_metadata 0 -v error $outputPath
-    } else {
-        & $ffmpegPath -i $file.FullName `
-            -map 0:v -map 0:a? -map 0:s? `
-            -c:v copy -c:a copy -c:s srt `
-            -map_metadata 0 -v error $outputPath
+    # MAPPING: Target Video, Audio, Subs, and Data (for EIA-608)
+    $mapArgs = @("-map", "0:v", "-map", "0:a?", "-map", "0:s?", "-map", "0:d?")
+
+    # TRY 1: SRT Conversion (Jellyfin optimized)
+    $action = "SRT Transcode"
+    & $ffmpegPath -i "$($file.FullName)" $mapArgs -c:v copy -c:a copy -c:s srt -ignore_unknown -map_metadata 0 -v error "$outputPath"
+
+    # FALLBACK 1: Stream Copy (Original Subtitle format)
+    if ($LASTEXITCODE -ne 0) {
+        if (Test-Path $outputPath) { Remove-Item $outputPath }
+        $action = "Stream Copy"
+        & $ffmpegPath -i "$($file.FullName)" $mapArgs -c:v copy -c:a copy -c:s copy -ignore_unknown -map_metadata 0 -v error "$outputPath"
+    }
+
+    # FALLBACK 2: Telemetry Shield (The "Mavic" Fix - Strips non-standard data)
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "        ! Muxing error detected. Stripping Data streams..." -ForegroundColor Yellow
+        if (Test-Path $outputPath) { Remove-Item $outputPath }
+        $action = "Clean Remux (Stripped Data)"
+        & $ffmpegPath -i "$($file.FullName)" -map 0:v -map 0:a? -map 0:s? -c:v copy -c:a copy -c:s copy -dn -ignore_unknown -map_metadata 0 -v error "$outputPath"
     }
 
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "[2/2] Auditing with $selectedEngine..." -ForegroundColor Gray
-        $hwArgs = if ($selectedEngine -ne "none") { @("-hwaccel", $selectedEngine) } else { @() }
+        # --- 3. Audit for Success ---
+        Write-Host "[2/2] Auditing..." -ForegroundColor Gray
+        $audit = & $ffmpegPath -hwaccel auto -i "$outputPath" -f null - 2>&1
         
-        $auditTimer = [System.Diagnostics.Stopwatch]::StartNew()
-        $log = & $ffmpegPath $hwArgs -i $outputPath -f null -benchmark - 2>&1
-        $auditTimer.Stop()
-
-        $logString = $log -join "`n"
-        if ($logString -match 'frame=\s*(\d+)') {
-            $frames = [int]$matches[1]
-            $sec = $auditTimer.Elapsed.TotalSeconds
-            $fps = [math]::Round($frames / $sec, 2)
-            $totalFrames += $frames
-            $totalAuditTime += $sec
-            
-            $subCheck = & $ffprobePath -v error -select_streams s -show_entries stream=codec_name -of csv=p=0 $outputPath
-            $subStatus = if($subCheck) { "SUBS: OK ($($subCheck -join ','))" } else { "SUBS: NONE" }
-
-            # TUNED PERFORMANCE TELEMETRY: Focus on Decoder Throughput
-            if ($fps -lt 2.0 -and $selectedEngine -ne "none") {
-                Write-Host "VERIFIED: $frames frames @ $fps FPS (DECODER BOTTLE NECK: Critical Low)" -ForegroundColor Red
-            } elseif ($fps -lt 15.0 -and $selectedEngine -ne "none") {
-                Write-Host "VERIFIED: $frames frames @ $fps FPS (LOW THROUGHPUT: Non-Native HW Profile)" -ForegroundColor Yellow
-            } else {
-                Write-Host "VERIFIED: $frames frames @ $fps FPS (OPTIMAL)" -ForegroundColor Green
-            }
-            Write-Host "       $subStatus" -ForegroundColor Gray
+        if ($audit -match 'frame=') {
+            Write-Host "        SUCCESS: $action" -ForegroundColor Green
+            $filesProcessed++
+        } else {
+            Write-Host "        WARNING: Remux created but Audit failed." -ForegroundColor Red
         }
-        $filesProcessed++
     }
 }
 
-# --- 3. Final Report ---
+# --- Final Report ---
 $totalTime = (Get-Date) - $startTime
 Write-Host "`n======================= REPORT =========================" -ForegroundColor Magenta
-Write-Host "Total Files      : $filesProcessed"
-if ($totalAuditTime -gt 0) {
-    $avgFps = [math]::Round($totalFrames / $totalAuditTime, 2)
-    Write-Host "Average Perf     : $avgFps FPS" -ForegroundColor Yellow
-}
-Write-Host "Total Duration   : $($totalTime.ToString('hh\:mm\:ss'))"
+Write-Host "Files Successfully Remuxed : $filesProcessed"
+Write-Host "Total Duration             : $($totalTime.ToString('hh\:mm\:ss'))"
 Write-Host "========================================================" -ForegroundColor Magenta
