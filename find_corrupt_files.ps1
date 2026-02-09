@@ -108,41 +108,56 @@ Write-Host "Hardware Success : $successCount" -ForegroundColor Green
 Write-Host "Total Time       : $($globalWatch.Elapsed.ToString('hh\:mm\:ss'))"
 Write-Host "===============================================================" -ForegroundColor Cyan
 
-# --- 6. Interactive Original Removal ---
+# --- 6. Interactive Production Promotion ---
 Write-Host "`n"
 $standardizedFiles = Get-ChildItem -Recurse | Where-Object { $_.Name -match "_standardized\.(mkv|mp4)$" }
 
 if ($standardizedFiles.Count -gt 0) {
-    Write-Host "FOUND: $($standardizedFiles.Count) standardized versions ready for cleanup." -ForegroundColor Cyan
-    $deleteChoice = Read-Host "Would you like to REMOVE the original source files? (Y/N)"
+    Write-Host "FOUND: $($standardizedFiles.Count) standardized versions ready for promotion." -ForegroundColor Cyan
+    $promoteChoice = Read-Host "Promote standardized files to Production and rename originals to _ori? (Y/N)"
 
-    if ($deleteChoice -eq "Y") {
-        Write-Host "`nStarting Cleanup..." -ForegroundColor Red
-        $removedCount = 0
+    if ($promoteChoice -eq "Y") {
+        Write-Host "`nStarting Promotion & Backup..." -ForegroundColor Green
+        $processedCount = 0
 
         foreach ($pfile in $standardizedFiles) {
-            # Find the file that DOES NOT have the suffix
-            $sourceName = $pfile.Name -replace "_standardized", ""
-            $sourcePath = Join-Path $pfile.DirectoryName $sourceName
+            # Define the target Production Name (no suffix) and the Backup Name (_ori)
+            $productionName = $pfile.Name -replace "_standardized", ""
+            $productionPath = Join-Path $pfile.DirectoryName $productionName
+            
+            $extension = $pfile.Extension
+            $baseName = $pfile.BaseName -replace "_standardized", ""
+            $backupPath = Join-Path $pfile.DirectoryName "$($baseName)_ori$($extension)"
 
-            if (Test-Path $sourcePath) {
+            if (Test-Path $productionPath) {
                 try {
-                    # Verify the standardized file is valid before deleting source
-                    if ($pfile.Length -gt ($file.Length * 0.1)) { # Basic 10% size sanity check
-                        Remove-Item $sourcePath -Force -ErrorAction Stop
-                        Write-Host "REMOVED: $sourceName" -ForegroundColor Gray
-                        $removedCount++
+                    # 1. Sanity Check: Ensure standardized file isn't an empty/tiny husk
+                    if ($pfile.Length -gt 1mb) {
+                        
+                        # 2. Rename Original to _ori (The Backup)
+                        # If a backup already exists, we overwrite it to prevent script hang
+                        Move-Item $productionPath $backupPath -Force -ErrorAction Stop
+                        
+                        # 3. Rename Standardized to Production (The Swap)
+                        Move-Item $pfile.FullName $productionPath -Force -ErrorAction Stop
+                        
+                        Write-Host "PROMOTED: $productionName (Original saved as _ori)" -ForegroundColor Gray
+                        $processedCount++
                     }
                 } catch {
-                    Write-Host "SKIP: Could not delete $sourceName (File locked or access denied)" -ForegroundColor Yellow
+                    Write-Host "ERROR: Failed to process $productionName - $($_.Exception.Message)" -ForegroundColor Red
                 }
+            } else {
+                # Handle cases where standardized exists but the "original" is already gone/renamed
+                Write-Host "NOTICE: Original source for $($pfile.Name) not found. Renaming to production." -ForegroundColor Yellow
+                Rename-Item $pfile.FullName $productionName -Force
             }
         }
-        Write-Host "`nCleanup Complete. $removedCount original files removed." -ForegroundColor Green
-        Write-Host "Your library now consists of '_standardized' versions." -ForegroundColor Cyan
+        Write-Host "`nPromotion Complete. $processedCount files updated." -ForegroundColor Green
+        Write-Host "You can now manually delete all '*_ori$extension' files after verification." -ForegroundColor Cyan
     } else {
-        Write-Host "`nCleanup cancelled. All files retained." -ForegroundColor Yellow
+        Write-Host "`nProcess cancelled." -ForegroundColor Yellow
     }
 } else {
-    Write-Host "No standardized files found to clean up." -ForegroundColor Gray
+    Write-Host "No standardized files found to promote." -ForegroundColor Gray
 }
