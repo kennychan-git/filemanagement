@@ -7,30 +7,31 @@ $ffmpegPath = if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { (Get-Comma
 
 $ffprobePath = Join-Path (Split-Path $ffmpegPath) "ffprobe.exe"
 
-Write-Host "================ LIBRARY STANDARDIZER v2.9 ================" -ForegroundColor Cyan
-Write-Host "MODE    : EN/CH Optimization + Robust Array Logic"
+Write-Host "================ LIBRARY STANDARDIZER v3.0 ================" -ForegroundColor Cyan
+Write-Host "MODE    : EN/CH Optimization + Double-Run Protection"
 Write-Host "===========================================================" -ForegroundColor Cyan
 
 # =========================================================
-# 2. TARGET SELECTION
+# 2. TARGET SELECTION (Frozen in Memory)
 # =========================================================
-$files = Get-ChildItem -File | Where-Object { 
+# We wrap the Get-ChildItem in @() to force it to complete before the loop starts
+$files = @(Get-ChildItem -File | Where-Object { 
     $_.Extension -eq ".mkv" -and $_.Name -notlike "*_standardized*" 
-}
+})
 
 foreach ($file in $files) {
     $outputPath = Join-Path $file.DirectoryName ($file.BaseName + "_standardized.mkv")
     
-    # Skip if already exists
+    # NEW LOGIC: Skip if standardized file already exists to prevent loops
     if (Test-Path $outputPath) {
-        Write-Host "SKIPPING: '$($file.Name)' already has a standardized version." -ForegroundColor DarkYellow
+        Write-Host "SKIPPING: $($file.Name) (Standardized version already exists)" -ForegroundColor Gray
         continue
     }
 
     $origDuration = & $ffprobePath -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $file.FullName
-    
     $streamData = @(& $ffprobePath -v error -show_entries stream=index,codec_type,channels:stream_tags=language -of csv=p=0 $file.FullName)
     
+    # Define language patterns
     $engPattern = "eng"
     $chiPatterns = @("chi", "zho", "zh", "zh-cn", "zh-tw", "cmn")
 
@@ -69,18 +70,13 @@ foreach ($file in $files) {
         }
     }
 
-    # SAFETY CHECK: If no audio tracks found at all, skip optimization to prevent FFmpeg filter error
-    if ($optimizeJobs.Count -eq 0) {
-        Write-Host "WARNING: No audio tracks found in $($file.Name). Skipping audio optimization." -ForegroundColor Red
-    }
-
     $keepSubIdx = @($allSubs | Where-Object {
         $line = $_
         $match = ($line -like "*,$engPattern*")
         foreach ($p in $chiPatterns) { if ($line -like "*,$p*") { $match = $true } }
         $match
     } | ForEach-Object { $_.Split(',')[0] })
-    
+
     Write-Host "Standardizing: $($file.Name)" -ForegroundColor Cyan
     Write-Host "Found: $($engAudioLines.Count) English, $($chiAudioLines.Count) Chinese tracks." -ForegroundColor Gray
     foreach ($job in $optimizeJobs) {
@@ -90,7 +86,7 @@ foreach ($file in $files) {
     # =========================================================
     # 3. CONSTRUCT ARGUMENTS
     # =========================================================
-    $ffArgs = @("-hide_banner", "-loglevel", "error", "-stats", "-i", $file.FullName)
+    $ffArgs = @("-hide_banner", "-loglevel", "error", "-stats", "-y", "-i", $file.FullName) # Added -y to auto-overwrite if needed
     $ffArgs += "-map", "0:v:0", "-c:v", "copy"
 
     $outIdx = 0
@@ -109,25 +105,21 @@ foreach ($file in $files) {
             $filterStrings += "[0:$($job.index)]$norm"
         }
     }
+    $ffArgs += "-filter_complex", ($filterStrings -join ";")
 
-    # Only add filter_complex if we actually have jobs to run
-    if ($filterStrings.Count -gt 0) {
-        $ffArgs += "-filter_complex", ($filterStrings -join ";")
+    $defaultTrackIdx = $null
+    foreach ($job in $optimizeJobs) {
+        $tag = "tv_$($job.lang)"
+        $ffArgs += "-map", "[$tag]", "-c:a:$outIdx", "aac", "-b:a:$outIdx", "192k"
+        $ffArgs += "-metadata:s:a:$outIdx", "title=TV Optimized ($($job.label))", "-metadata:s:a:$outIdx", "language=$($job.lang)"
         
-        $defaultTrackIdx = $null
-        foreach ($job in $optimizeJobs) {
-            $tag = "tv_$($job.lang)"
-            $ffArgs += "-map", "[$tag]", "-c:a:$outIdx", "aac", "-b:a:$outIdx", "192k"
-            $ffArgs += "-metadata:s:a:$outIdx", "title=TV Optimized ($($job.label))", "-metadata:s:a:$outIdx", "language=$($job.lang)"
-            
-            if ($job.lang -eq "eng") { $defaultTrackIdx = $outIdx }
-            elseif ($null -eq $defaultTrackIdx) { $defaultTrackIdx = $outIdx }
-            $outIdx++
-        }
-
-        $ffArgs += "-disposition:a", "0" 
-        if ($null -ne $defaultTrackIdx) { $ffArgs += "-disposition:a:$defaultTrackIdx", "default" }
+        if ($job.lang -eq "eng") { $defaultTrackIdx = $outIdx }
+        elseif ($null -eq $defaultTrackIdx) { $defaultTrackIdx = $outIdx }
+        $outIdx++
     }
+
+    $ffArgs += "-disposition:a", "0" 
+    if ($null -ne $defaultTrackIdx) { $ffArgs += "-disposition:a:$defaultTrackIdx", "default" }
 
     foreach ($idx in $keepSubIdx) { $ffArgs += "-map", "0:$idx", "-c:s", "copy" }
 
@@ -145,4 +137,3 @@ foreach ($file in $files) {
         }
     }
 }
-# END OF FILE (Ensure no duplicated code exists below this line)
